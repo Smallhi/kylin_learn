@@ -414,7 +414,12 @@ public class KylinConfig extends KylinConfigBase {
         KylinConfig base = base();
         if (base != this)
             return base.getManager(clz);
-
+        //Manager 是一个缓存，使用ConcurrentHashMap<class,Object>存储，查找时，先从内存中找，如果找不到，就新建。
+        // 具体步骤为：
+        //1. 判断managerCache(一个并发的hashMap)是否为null,如果是null,创建一个
+        //2. 通过map的get方法，查找，找到就返回
+        //3. 否则，使用synchronized关键字，锁住这个class,调用对应Mananager的newInstance创建一个实例对象
+        // 说明：通过clz.getDeclaredMethod(方法名，类名：参数类型)，实际获取的是clz的方法。第二个参数是参数类型，是一个类名.class
         if (managersCache == null) {
             managersCache = new ConcurrentHashMap<>();
         }
@@ -422,7 +427,9 @@ public class KylinConfig extends KylinConfigBase {
         Object mgr = managersCache.get(clz);
         if (mgr != null)
             return (T) mgr;
-        
+
+        //synchronized是一种同步锁，这里是锁住下面这个clz这个类的范围，防止多个线程同时访问这个类中的synchronized static方法
+        // 它可以对类的所有对象实例其作用。
         synchronized (clz) {
             mgr = managersCache.get(clz);
             if (mgr != null)

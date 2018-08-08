@@ -55,6 +55,8 @@ public class DataModelManager {
     // called by reflection
     static DataModelManager newInstance(KylinConfig conf) {
         try {
+            //如果配置文件有，就去配置文件的，否则默认取DataModelManager.class.getName()
+            //通过反射创建类的实例
             String cls = StringUtil.noBlank(conf.getDataModelManagerImpl(), DataModelManager.class.getName());
             Class<? extends DataModelManager> clz = ClassUtil.forName(cls, DataModelManager.class);
             return clz.getConstructor(KylinConfig.class).newInstance(conf);
@@ -68,14 +70,18 @@ public class DataModelManager {
     private KylinConfig config;
 
     // name => DataModelDesc
+
+    // crud 的父类包含一个熟悉BroadCast， 所有这个缓存是可以广播和同步的
     private CaseInsensitiveStringCache<DataModelDesc> dataModelDescMap;
     private CachedCrudAssist<DataModelDesc> crud;
 
     // protects concurrent operations around the cached map, to avoid for example
     // writing an entity in the middle of reloading it (dirty read)
+    // 自动读写锁目的只是锁住读写，数据还在crud里
     private AutoReadWriteLock modelMapLock = new AutoReadWriteLock();
 
     public DataModelManager(KylinConfig config) throws IOException {
+        // 封装构造方法为init
         init(config);
     }
 
@@ -96,12 +102,15 @@ public class DataModelManager {
 
         // touch lower level metadata before registering model listener
         TableMetadataManager.getInstance(config);
+        // curd加载数据
         crud.reloadAll();
+        //通知Listener，getInstance会创建一个通告实例，创建的过程就会启动线程并发事件分发出去，实际上应该由Listeners 实现处理完成后通知处理事件的，
         Broadcaster.getInstance(config).registerListener(new DataModelSyncListener(), "data_model");
     }
 
     private class DataModelSyncListener extends Broadcaster.Listener {
 
+        //用户的缓存不需要在每台机器都存，所以直接load到本机缓存
         @Override
         public void onProjectSchemaChange(Broadcaster broadcaster, String project) throws IOException {
             //clean up the current project's table desc
@@ -112,6 +121,11 @@ public class DataModelManager {
                     crud.reloadQuietly(model);
                 }
             }
+            // 这个事件不需要通知
+            //broadcaster.notifyListener();
+            /**
+             *
+             */
         }
 
         @Override
@@ -123,7 +137,7 @@ public class DataModelManager {
                 else
                     crud.reloadQuietly(cacheKey);
             }
-
+        // 通知我完成了。。。
             for (ProjectInstance prj : ProjectManager.getInstance(config).findProjectsByModel(cacheKey)) {
                 broadcaster.notifyProjectSchemaUpdate(prj.getName());
             }

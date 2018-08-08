@@ -62,6 +62,12 @@ public class ModelService extends BasicService {
 
     private static final Logger logger = LoggerFactory.getLogger(ModelService.class);
 
+    /**
+     * 自动封装cubeService,AclEvaluate
+     * 对外提供DataModel的 CRUD 操作以及其他操作
+     */
+
+
     @Autowired
     @Qualifier("cubeMgmtService")
     private CubeService cubeService;
@@ -69,6 +75,9 @@ public class ModelService extends BasicService {
     @Autowired
     private AclEvaluate aclEvaluate;
 
+    // 判断Model名字是否有效
+    // 1. 是否为有效字符串，非空 && 是否满足指定字符匹配规则（使用正则匹配）
+    // 2. 是否已存在。 通过父类的getDataModelManager方法拿到素有的models的名称，并比较名称
     public boolean isModelNameValidate(final String modelName) {
         if (StringUtils.isEmpty(modelName) || !ValidateUtil.isAlphanumericUnderscore(modelName)) {
             return false;
@@ -81,6 +90,9 @@ public class ModelService extends BasicService {
         return true;
     }
 
+    //list 所有models ，注意这里使用ArrayList存储Models对象。
+    // 判断是否授权，在判断是否满足筛选参数。
+    // 返回排序
     public List<DataModelDesc> listAllModels(final String modelName, final String projectName, boolean exactMatch)
             throws IOException {
         List<DataModelDesc> models;
@@ -109,6 +121,7 @@ public class ModelService extends BasicService {
         return filterModels;
     }
 
+    // 返回满足条件的模型的子链表，limit 和 offset由HTTP参数提供
     public List<DataModelDesc> getModels(final String modelName, final String projectName, final Integer limit,
             final Integer offset) throws IOException {
 
@@ -124,7 +137,7 @@ public class ModelService extends BasicService {
 
         return modelDescs.subList(offset, offset + limit);
     }
-
+   // 使用父类的getDataModelManager获取DataModelManager创建DataModel
     public DataModelDesc createModelDesc(String projectName, DataModelDesc desc) throws IOException {
         aclEvaluate.checkProjectWritePermission(projectName);
         Message msg = MsgPicker.getMsg();

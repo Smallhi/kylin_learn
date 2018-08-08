@@ -147,6 +147,7 @@ abstract public class CachedCrudAssist<T extends RootPersistentEntity> {
 
     public T reloadAt(String path) {
         try {
+            //Resource 的getResource 方法获取到一个实体。然后将实体加载到缓存中
             T entity = store.getResource(path, entityType, serializer);
             if (entity == null) {
                 logger.warn("No " + entityType.getSimpleName() + " found at " + path + ", returning null");

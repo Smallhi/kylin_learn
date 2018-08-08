@@ -54,6 +54,7 @@ public class CacheService extends BasicService implements InitializingBean {
             HBaseConnection.clearConnCache(); // take the chance to clear HBase connection cache as well
         }
 
+        // 一旦受到项目结构变化，Cache查询服务将清空所有缓存，而对应的Manager又会将新的数据加载到缓存中
         @Override
         public void onProjectSchemaChange(Broadcaster broadcaster, String project) throws IOException {
             cleanDataCache(project);

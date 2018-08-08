@@ -6,9 +6,9 @@
  * to you under the Apache License, Version 2.0 (the
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -45,13 +45,27 @@ import com.google.common.base.Objects;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 
+// 如何在分布式系统中缓存同步，怎么创建，怎么更新，怎么删除，怎么同步，怎么通告，怎么响应？
+// 以下是注解翻译
+// 在Kylin的服务集群上广播元数据的变化
+//  原始服务通过Rest API通报Kylin服务器（包括自己）（变化）事件。
+//  对于目标服务来说，监听器被注册用来处理接收的事件。作为处理的一部分，监听器能重新通知其他本地的监听器一个新的事件
+// 这里有几个概念 Origin Server / Target Server / announce/ Listeners/ listeners register
+
+// 一个代男性的项目空间变化事件有：
+// - 模型在原始服务器上更新，那么，一个model更新事件被通报
+// - 在所有的服务上，model 监听器被调用，重载模型，并且告知一个项目空间更新事件（接受通告，处理，并告知）
+// - 所有的监听器相应项目空间更新，--重载cube描述，清理项目L2级别缓存，清理Calcite数据源等等。
+
+
+
 /**
  * Broadcast metadata changes across all Kylin servers.
- * 
+ *
  * The origin server announce the event via Rest API to all Kylin servers including itself.
- * On target server, listeners are registered to process events. As part of processing, a 
+ * On target server, listeners are registered to process events. As part of processing, a
  * listener can re-notify a new event to other local listeners.
- * 
+ *
  * A typical project schema change event:
  * - model is update on origin server, a "model" update event is announced
  * - on all servers, model listener is invoked, reload the model, and notify a "project_schema" update event
@@ -83,30 +97,58 @@ public class Broadcaster {
     private ExecutorService announceMainLoop;
     private ExecutorService announceThreadPool;
     private SyncErrorHandler syncErrorHandler;
+
+    // 广播的事件一个链表的阻塞队列
+    // TODO LinkedBlockingDeque特性
     private BlockingDeque<BroadcastEvent> broadcastEvents = new LinkedBlockingDeque<>();
     private Map<String, List<Listener>> listenerMap = Maps.newConcurrentMap();
     private AtomicLong counter = new AtomicLong(); // a counter for testing purpose
-    
+
     private Broadcaster(final KylinConfig config) {
         this.config = config;
         this.syncErrorHandler = getSyncErrorHandler(config);
+        // TODO newSingleThreadExecutor特性
+
+        //通告服务线程
+        // 通告主循环，使用Java多线程建立一个单线程的线程池，将多个任务交个这个线程池，会一个接一个的处理，如果出现异常，会有一个新的线程替代
         this.announceMainLoop = Executors.newSingleThreadExecutor(new DaemonThreadFactory());
+
+        // 通告服务处理线程池
+        // 这个线程池是要通过多线程的方式通告多个服务
         this.announceThreadPool = new ThreadPoolExecutor(1, 10, 60L, TimeUnit.SECONDS,
                 new LinkedBlockingQueue<Runnable>(), new DaemonThreadFactory());
-
+        // 读取到Kylin.properties 中所有的Rest服务器 实际就是参数kylin.server.cluster-server
         final String[] nodes = config.getRestServers();
         if (nodes == null || nodes.length < 1) {
             logger.warn("There is no available rest server; check the 'kylin.server.cluster-servers' config");
         }
         logger.debug(nodes.length + " nodes in the cluster: " + Arrays.toString(nodes));
 
+        // Executors execut是父类的抽象方法，需实现
         announceMainLoop.execute(new Runnable() {
             @Override
+            // run 是实际运行的命令
             public void run() {
+                // 使用一个Map存储所有的服务的restClient.
                 final Map<String, RestClient> restClientMap = Maps.newHashMap();
 
+                //死循环，如果通告服务线程池没有不shutdown，就一直处理
                 while (!announceThreadPool.isShutdown()) {
                     try {
+                        // 处理逻辑是：
+                        // 1. 从阻塞队列事件中拿到队首的事件
+                        // 2. 从配置文件中拿到所有的服务url
+                        // 3. 如果restClient Map为空，就把这些URL加到Map中，
+                        // 4. 判断广播事件的目的节点，如果为空，就默认通知所有节点，如果不是通知所有或者是单节点
+                        // ，就跳出循环，不执行通告（这个地方是单机版和集群版的区别）
+                        // 5. 通告服务线程池启动，通过rest客户封装的方法wipeCache将时间按方出去。并进行容错处理
+                        // 说明通告事件的参数有：实体，事件和缓存key值。
+
+                        // 事件怎么写入的，通告在创建实例的同时，需要注册监听器，监听器的作用就是监听事件变化，一旦有变化就把事件加到队列里面，由通报器发出去。
+                        // 监听器是个抽象类，需要在具体类中实现，
+                        // 实际上，缓存同步的方法是，先由缓存调put方法通告所有的服务。服务上的再调用监听
+                        // 最后对外暴露的服务提供通知监听器的方法，也就是在restAPI接收到请求之后告知监听器跑对应逻辑。
+
                         final BroadcastEvent broadcastEvent = broadcastEvents.takeFirst();
 
                         String[] restServers = config.getRestServers();
@@ -121,11 +163,11 @@ public class Broadcaster {
                         if (toWhere == null)
                             toWhere = "all";
                         logger.debug("Announcing new broadcast to " + toWhere + ": " + broadcastEvent);
-                        
+
                         for (final String node : restServers) {
                             if (!(toWhere.equals("all") || toWhere.equals(node)))
                                 continue;
-                            
+
                             announceThreadPool.execute(new Runnable() {
                                 @Override
                                 public void run() {
@@ -161,7 +203,7 @@ public class Broadcaster {
     public KylinConfig getConfig() {
         return config;
     }
-    
+
     public void stopAnnounce() {
         announceThreadPool.shutdown();
         announceMainLoop.shutdown();
@@ -384,7 +426,7 @@ public class Broadcaster {
     public static class BroadcastEvent {
         private int retryTime;
         private String targetNode; // NULL means to all
-        
+
         private String entity;
         private String event;
         private String cacheKey;
