@@ -44,6 +44,10 @@ public class QueryConnection {
             }
             isRegister = true;
         }
+        // Calcite 并没有建立一个服务的引擎等待查询。 而是通过对外暴露接口，界面model 的形式提供连接。
+        // 然后calcite 将SQL翻译成逻辑计划，并最终解析成用户指定的物理计划
+        // 实际的执行计划的逻辑是在org.apache.calcite.jdbc.Driver 中实现，所以创建连接的时候，需要指明模型（这里是个JSON文件）
+        // 由Driver调起连接，连接之后由calcite 负责解析执行和结果返回，物理计划和优化规则通过接口的方式实现
         File olapTmp = OLAPSchemaFactory.createTempOLAPJson(project, KylinConfig.getInstanceFromEnv());
         Properties info = new Properties();
         info.putAll(KylinConfig.getInstanceFromEnv().getCalciteExtrasProperties());

@@ -211,6 +211,15 @@ public class JobService extends BasicService implements InitializingBean {
         return jobInstance;
     }
 
+    // 提交Job的流程
+    // 1. 检查Cube的状态
+    // 2. 检查Cube描述签名
+    // 3. 检查是否运行build
+    // 4. 判断cube是否运行并发构建
+    // 5. 初始化对象CubeSegment:newseg 和DefaultChainedExecutable:job
+    // 6. 通过getCubeManager获取CubeManager,再调用appendSegment返回CubeSegment
+    // 7. 通过EngineFactory的createBatchCubingJob方法，传入（newSeg, submitter）返回一个Job实例。
+    // 构建类型有三种 BUILD/MERGE/REFRESH,只是传入的CubeSegment不同
     public JobInstance submitJobInternal(CubeInstance cube, TSRange tsRange, SegmentRange segRange, //
             Map<Integer, Long> sourcePartitionOffsetStart, Map<Integer, Long> sourcePartitionOffsetEnd, //
             CubeBuildTypeEnum buildType, boolean force, String submitter) throws IOException {
@@ -229,6 +238,7 @@ public class JobService extends BasicService implements InitializingBean {
 
         DefaultChainedExecutable job;
 
+        // TODO CubeSegment的作用？
         CubeSegment newSeg = null;
         try {
             if (buildType == CubeBuildTypeEnum.BUILD) {
@@ -240,6 +250,12 @@ public class JobService extends BasicService implements InitializingBean {
                 job = EngineFactory.createBatchCubingJob(newSeg, submitter);
             } else if (buildType == CubeBuildTypeEnum.MERGE) {
                 newSeg = getCubeManager().mergeSegments(cube, tsRange, segRange, force);
+                // 构建cube使用什么引擎包含在cube的描述中（CubeDesc），由用户指明。cube实例（CubeInstance）需要一个
+                // CubeDesc,CubeInstance 同时实现了接口IRealization, IBuildable
+                // CubeSegment 包含了CubeInstance 并且实现了接口IBuildable, ISegment, Serializable ，IBuildable
+                //接口继承了 IEngineAware ， IEngineAware 中指明引擎类型
+                // 引擎工程创建job, 需要传入的是CubeSegment，可以理解为构建一个片段的cube，所有需要传入cube实例。
+                // EngineFactory的接口根据传入的CubeSegment（实现了接口IEngineAware），包含方法引擎类型
                 job = EngineFactory.createBatchMergeJob(newSeg, submitter);
             } else if (buildType == CubeBuildTypeEnum.REFRESH) {
                 newSeg = getCubeManager().refreshSegment(cube, tsRange, segRange);
@@ -248,6 +264,7 @@ public class JobService extends BasicService implements InitializingBean {
                 throw new BadRequestException(String.format(msg.getINVALID_BUILD_TYPE(), buildType));
             }
 
+            // 将Job添加到执行管理器中，调度器会执行执行管理器中的Job
             getExecutableManager().addJob(job);
 
         } catch (Exception e) {
@@ -395,7 +412,8 @@ public class JobService extends BasicService implements InitializingBean {
         return jobInstance;
     }
 
-    private void checkCubeDescSignature(CubeInstance cube) {
+    private void
+    checkCubeDescSignature(CubeInstance cube) {
         Message msg = MsgPicker.getMsg();
 
         if (!cube.getDescriptor().checkSignature())

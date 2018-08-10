@@ -1071,26 +1071,3 @@ public class QueryService extends BasicService {
 
 }
 
-@SuppressWarnings("serial")
-class QueryRecord extends RootPersistentEntity {
-
-    @JsonProperty()
-    private Query[] queries;
-
-    public QueryRecord() {
-
-    }
-
-    public QueryRecord(Query[] queries) {
-        this.queries = queries;
-    }
-
-    public Query[] getQueries() {
-        return queries;
-    }
-
-    public void setQueries(Query[] queries) {
-        this.queries = queries;
-    }
-
-}
